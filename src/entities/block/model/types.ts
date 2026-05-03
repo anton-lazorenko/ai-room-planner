@@ -37,6 +37,8 @@ export interface DragState {
   blockH0: number;
   rotation0: number;
   angleOffset: number;
+  selectedIds?: string[];
+  origPositions?: Record<string, { x: number; y: number }>;
 }
 
 export interface PanState {

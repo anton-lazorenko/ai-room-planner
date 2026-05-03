@@ -438,7 +438,7 @@ export function RoomCanvas() {
         rotation0: bl.rotation, angleOffset,
         selectedIds: activeSelection,
         origPositions: orig,
-      } as unknown as DragState;
+      }
       return;
     }
 
