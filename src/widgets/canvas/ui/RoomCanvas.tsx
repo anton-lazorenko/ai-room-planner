@@ -63,6 +63,12 @@ const COLOR_PRESETS = [
 
 export function RoomCanvas() {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [multiSelected, setMultiSelected] = useState<string[]>([]);
+  const multiSelectedRef = useRef<string[]>(multiSelected);
+  useEffect(() => { multiSelectedRef.current = multiSelected; }, [multiSelected]);
+  const boxStartRef = useRef<{ x: number; y: number } | null>(null);
+  const selectingRef = useRef(false);
+  const [boxRect, setBoxRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const [blocks, setBlocks] = useState<Block[]>([
     { id: uid(), type: "room", label: "Living Room", x: 80, y: 80, w: 280, h: 220, rotation: 0, color: "#e8f4fd" },
@@ -71,6 +77,8 @@ export function RoomCanvas() {
 
   const [selected, setSelected] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const editingIdRef = useRef<string | null>(editingId);
+  useEffect(() => { editingIdRef.current = editingId; }, [editingId]);
   const [editLabel, setEditLabel] = useState("");
   const [vp, setVp] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
@@ -82,6 +90,9 @@ export function RoomCanvas() {
   useEffect(() => { vpRef.current = vp; }, [vp]);
 
   const selectedBlock = blocks.find(b => b.id === selected) ?? null;
+
+  const blocksRef = useRef<Block[]>([]);
+  useEffect(() => { blocksRef.current = blocks; }, [blocks]);
 
   // ── Inspector local state ──────────────────────────────────────────────────
 
@@ -102,7 +113,7 @@ export function RoomCanvas() {
       setIrot(fmtRot(selectedBlock.rotation));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
+  }, [selected, multiSelected]);
 
   useEffect(() => {
     if (editingInspector.current || !selectedBlock) return;
@@ -140,7 +151,7 @@ export function RoomCanvas() {
       }
       return updated;
     });
-  }, [selected]);
+  }, [selected, multiSelected]);
 
   // ── Add block ──────────────────────────────────────────────────────────────
 
@@ -163,6 +174,12 @@ export function RoomCanvas() {
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   const deleteSelected = useCallback(() => {
+    if (multiSelected.length > 0) {
+      setBlocks(b => b.filter(bl => !multiSelected.includes(bl.id)));
+      setMultiSelected([]);
+      setSelected(null);
+      return;
+    }
     if (!selected) return;
     setBlocks(b => b.filter(bl => bl.id !== selected));
     setSelected(null);
@@ -172,13 +189,21 @@ export function RoomCanvas() {
 
   useEffect(() => {
     const dn = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !editingId) {
+      if (e.code === "Space" && !editingIdRef.current) {
         spaceRef.current = true;
         setIsPanning(true);
         e.preventDefault();
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && !editingId && !editingInspector.current) {
-        deleteSelected();
+      if ((e.key === "Delete" || e.key === "Backspace") && !editingIdRef.current && !editingInspector.current) {
+        const ms = multiSelectedRef.current;
+        if (ms && ms.length > 0) {
+          setBlocks(b => b.filter(bl => !ms.includes(bl.id)));
+          setMultiSelected([]);
+          setSelected(null);
+        } else if (selected) {
+          setBlocks(b => b.filter(bl => bl.id !== selected));
+          setSelected(null);
+        }
       }
       if (e.key === "Escape") { setSelected(null); setEditingId(null); }
     };
@@ -191,7 +216,7 @@ export function RoomCanvas() {
       window.removeEventListener("keydown", dn);
       window.removeEventListener("keyup", up);
     };
-  }, [deleteSelected, editingId]);
+  }, [selected]);
 
   // ── Wheel zoom ─────────────────────────────────────────────────────────────
 
@@ -217,6 +242,37 @@ export function RoomCanvas() {
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      // Box selection handling
+      if (selectingRef.current && boxStartRef.current && wrapRef.current) {
+        const rect = wrapRef.current.getBoundingClientRect();
+        const sx = boxStartRef.current.x;
+        const sy = boxStartRef.current.y;
+        const cx = e.clientX;
+        const cy = e.clientY;
+        const left = Math.min(sx, cx) - rect.left;
+        const top = Math.min(sy, cy) - rect.top;
+        const w = Math.abs(cx - sx);
+        const h = Math.abs(cy - sy);
+        setBoxRect({ x: left, y: top, w, h });
+
+        // compute world-space box to test blocks
+        const scale = vpRef.current.scale;
+        const worldLeft = (Math.min(sx, cx) - rect.left - vpRef.current.x) / scale;
+        const worldTop = (Math.min(sy, cy) - rect.top - vpRef.current.y) / scale;
+        const worldRight = (Math.max(sx, cx) - rect.left - vpRef.current.x) / scale;
+        const worldBottom = (Math.max(sy, cy) - rect.top - vpRef.current.y) / scale;
+
+        const hits = blocksRef.current.filter(bl => {
+          const bx1 = bl.x;
+          const by1 = bl.y;
+          const bx2 = bl.x + bl.w;
+          const by2 = bl.y + bl.h;
+          return !(bx2 < worldLeft || bx1 > worldRight || by2 < worldTop || by1 > worldBottom);
+        }).map(b => b.id);
+
+        setMultiSelected(hits);
+        return;
+      }
       // Pan
       if (panRef.current) {
         const { mouseX0, mouseY0, vpX0, vpY0 } = panRef.current;
@@ -248,6 +304,19 @@ export function RoomCanvas() {
       // Move / Resize
       const dx = (e.clientX - d.mouseX0) / scale;
       const dy = (e.clientY - d.mouseY0) / scale;
+      // If group drag
+      // @ts-ignore
+      if (d.selectedIds && d.origPositions) {
+        const ids = d.selectedIds as string[];
+        const orig = d.origPositions as Record<string, { x: number; y: number }>;
+        setBlocks(prev => prev.map(bl => {
+          if (!ids.includes(bl.id)) return bl;
+          const o = orig[bl.id];
+          if (!o) return bl;
+          return { ...bl, x: snap(o.x + dx), y: snap(o.y + dy) };
+        }));
+        return;
+      }
 
       setBlocks(prev => prev.map(bl => {
         if (bl.id !== d.blockId) return bl;
@@ -263,11 +332,21 @@ export function RoomCanvas() {
 
     const onUp = () => { dragRef.current = null; panRef.current = null; };
 
+    const onGlobalUp = (e: MouseEvent) => {
+      if (selectingRef.current) {
+        selectingRef.current = false;
+        boxStartRef.current = null;
+        setBoxRect(null);
+        return;
+      }
+      onUp();
+    };
+
     window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("mouseup", onGlobalUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("mouseup", onGlobalUp);
     };
   }, []);
 
@@ -282,7 +361,16 @@ export function RoomCanvas() {
       };
       return;
     }
-    if (e.target === e.currentTarget) setSelected(null);
+    if (e.target === e.currentTarget) {
+      // start box selection
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      boxStartRef.current = { x: e.clientX, y: e.clientY };
+      selectingRef.current = true;
+      setSelected(null);
+      setMultiSelected([]);
+      setBoxRect({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: 0, h: 0 });
+    }
   };
 
   // ── Block / handle mousedown ───────────────────────────────────────────────
@@ -291,7 +379,23 @@ export function RoomCanvas() {
     if (spaceRef.current) return;
     e.stopPropagation();
     e.preventDefault();
-    setSelected(bl.id);
+    // selection logic: toggle with ctrl/shift, otherwise single-select
+    const wasInMulti = multiSelected.includes(bl.id);
+    let activeSelection: string[] = [];
+    if (e.shiftKey || e.ctrlKey) {
+      setMultiSelected(prev => prev.includes(bl.id) ? prev.filter(id => id !== bl.id) : [...prev, bl.id]);
+      activeSelection = wasInMulti ? multiSelected.filter(id => id !== bl.id) : [...multiSelected, bl.id];
+    } else {
+      // if clicked an already-multi-selected item, keep the multi-selection
+      if (wasInMulti && multiSelected.length > 0) {
+        activeSelection = multiSelected.slice();
+        setMultiSelected(activeSelection);
+      } else {
+        activeSelection = [bl.id];
+        setMultiSelected([bl.id]);
+      }
+      setSelected(bl.id);
+    }
 
     let angleOffset = 0;
     if (mode === "rotate") {
@@ -302,6 +406,26 @@ export function RoomCanvas() {
       // Offset = where the mouse currently is relative to block's rotation
       // so the handle doesn't "jump" on first drag
       angleOffset = mouseAngle - bl.rotation * (Math.PI / 180);
+    }
+
+    // If multiple blocks selected (using computed activeSelection) and the clicked block is in that set, prepare group drag
+    if (activeSelection.length > 1 && activeSelection.includes(bl.id)) {
+      const selectedIds = activeSelection.slice();
+      const orig: Record<string, { x: number; y: number }> = {};
+      for (const id of selectedIds) {
+        const b = blocksRef.current.find(bb => bb.id === id);
+        if (b) orig[id] = { x: b.x, y: b.y };
+      }
+      dragRef.current = {
+        blockId: bl.id, mode: 'move',
+        mouseX0: e.clientX, mouseY0: e.clientY,
+        blockX0: bl.x, blockY0: bl.y,
+        blockW0: bl.w, blockH0: bl.h,
+        rotation0: bl.rotation, angleOffset,
+        selectedIds,
+        origPositions: orig,
+      } as unknown as DragState & { selectedIds?: string[]; origPositions?: Record<string, { x: number; y: number }> };
+      return;
     }
 
     dragRef.current = {
@@ -392,7 +516,7 @@ export function RoomCanvas() {
         {/* world */}
         <div style={{ position: "absolute", top: 0, left: 0, transformOrigin: "0 0", transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
           {blocks.map(bl => {
-            const sel = bl.id === selected;
+            const sel = bl.id === selected || multiSelected.includes(bl.id);
             return (
               <div
                 key={bl.id}
@@ -456,6 +580,10 @@ export function RoomCanvas() {
             );
           })}
         </div>
+        {/* selection rectangle (screen coords) */}
+        {boxRect && (
+          <div style={{ position: 'absolute', left: boxRect.x, top: boxRect.y, width: boxRect.w, height: boxRect.h, border: '1px dashed rgba(37,99,235,0.8)', background: 'rgba(37,99,235,0.06)', pointerEvents: 'none', zIndex: 15 }} />
+        )}
       </div>
 
       {/* ── RIGHT inspector ── */}
@@ -523,6 +651,12 @@ export function RoomCanvas() {
               Del · Esc · Dbl-click rename
             </p>
           </>
+        ) : multiSelected.length > 0 ? (
+          <div>
+            <p style={{ fontWeight: 600, color: "#6b7280", marginTop: 0 }}>{multiSelected.length} selected</p>
+            <p style={{ fontSize: 12, color: "#374151" }}>Drag any selected item to move the group. Use Shift/Ctrl to add/remove items.</p>
+            <button onClick={deleteSelected} style={S.delBtn}>🗑 Delete selected</button>
+          </div>
         ) : (
           <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>
             <p style={{ fontWeight: 600, color: "#6b7280", marginTop: 0 }}>No selection</p>
