@@ -754,7 +754,7 @@ const S = {
     textAlign: "left" as const, width: "100%",
   },
   zoomBadge: {
-    position: "absolute" as const, bottom: 52, right: 12,
+    position: "absolute" as const, bottom: 90, right: 12,
     background: "rgba(255,255,255,0.92)", border: "1px solid #e5e7eb",
     borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 500 as const,
     color: "#374151", cursor: "pointer", zIndex: 10, userSelect: "none" as const,

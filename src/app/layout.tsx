@@ -11,6 +11,11 @@ const headingFont = DM_Sans({
   variable: "--heading-font",
 });
 
+export const metadata = {
+  title: "Room Planner",
+  description: "Описание сайта",
+};
+
 export default function RootLayout({
   children,
 }: {

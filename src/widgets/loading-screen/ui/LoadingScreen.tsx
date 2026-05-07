@@ -10,7 +10,7 @@ export function LoadingScreen({ onStart }: Props) {
   const [showButton, setShowButton] = useState(false);
   const [typedTitle, setTypedTitle] = useState("");
 
-  const fullText = "AI Room Planner";
+  const fullText = "2D Room Planner";
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -29,7 +29,7 @@ export function LoadingScreen({ onStart }: Props) {
     const type = () => {
       const baseDelay = 80;
       const randomDelay = Math.random() * 120;
-
+      ``
       timeout = setTimeout(() => {
         setTypedTitle(fullText.slice(0, i + 1));
         i++;
